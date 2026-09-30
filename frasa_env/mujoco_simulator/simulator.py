@@ -40,7 +40,7 @@ class Simulator:
         selector = (contacts.geom[:, 0] != 0) * (contacts.geom[:, 1] != 0)
         forces = 0.0
         for id in np.argwhere(selector):
-            mujoco.mj_contactForce(self.model, self.data, id, forcetorque)
+            mujoco.mj_contactForce(self.model, self.data, id.item(), forcetorque)
             forces += np.linalg.norm(forcetorque[:3])
 
         return forces
