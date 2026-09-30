@@ -58,7 +58,7 @@ make
 5. Change LD_LIBRARY_PATH and PYGLFW_LIBRARY to match GLFW version you built and add it to your bashrc
 
 ```
-export LD_LIBRARY_PATH="LD_LIBRARY_PATH:path/to/glfw/build/src/"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:path/to/glfw/build/src/"
 export PYGLFW_LIBRARY="path/to/glfw/build/src/libglfw.so"
 ```
 
