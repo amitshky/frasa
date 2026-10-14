@@ -25,4 +25,19 @@ check-codestyle:
 
 commit-checks: format mypy lint
 
+run:
+	python enjoy_sbx.py \
+		--algo crossq \
+		--env frasa-standup-v0 \
+		--gym-packages frasa_env \
+		--folder logs/ \
+		--load-best \
+		--exp-id 0
+
+train:
+	python train_sbx.py \
+		--algo crossq \
+		--env frasa-standup-v0 \
+		--conf hyperparams/crossq.yml
+
 .PHONY: lint format check-codestyle commit-checks
