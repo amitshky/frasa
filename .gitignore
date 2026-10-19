@@ -6,3 +6,5 @@ sigmaban_model
 data/
 *.egg-info
 **/logs
+
+.tmuxinit
