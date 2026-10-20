@@ -8,3 +8,4 @@ data/
 **/logs
 
 .tmuxinit
+MUJOCO_LOG.TXT
