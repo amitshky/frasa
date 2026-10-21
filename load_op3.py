@@ -35,10 +35,10 @@ def main():
         )
 
         if joint_id_right == -1:
-            raise ValueError(f"Unable to find joint: {right_joint}")
+            raise ValueError(f"Unable to find joint: '{right_joint}'")
 
         if joint_id_left == -1:
-            raise ValueError(f"Unable to find joint: {left_joint}")
+            raise ValueError(f"Unable to find joint: '{left_joint}'")
 
         qpos_addr = model.jnt_qposadr[joint_id_right]
         data.qpos[qpos_addr] = np.deg2rad(angle_deg)
