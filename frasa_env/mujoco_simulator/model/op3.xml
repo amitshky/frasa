@@ -221,26 +221,50 @@
     <gyro name="gyro" site="trunk"/>
   </sensor>
 
-  <actuator>
-    <position name="head_yaw" joint="head_yaw"/>
-    <position name="head_pitch" joint="head_pitch"/>
-    <position name="left_shoulder_pitch" joint="left_shoulder_pitch"/>
-    <position name="left_shoulder_roll" joint="left_shoulder_roll"/>
-    <position name="left_elbow" joint="left_elbow"/>
-    <position name="right_shoulder_pitch" joint="right_shoulder_pitch"/>
-    <position name="right_shoulder_roll" joint="right_shoulder_roll"/>
-    <position name="right_elbow" joint="right_elbow"/>
-    <position name="left_hip_yaw" joint="left_hip_yaw"/>
-    <position name="left_hip_roll" joint="left_hip_roll"/>
-    <position name="left_hip_pitch" joint="left_hip_pitch"/>
-    <position name="left_knee" joint="left_knee"/>
-    <position name="left_ankle_pitch" joint="left_ankle_pitch"/>
-    <position name="left_ankle_roll" joint="left_ankle_roll"/>
-    <position name="right_hip_yaw" joint="right_hip_yaw"/>
-    <position name="right_hip_roll" joint="right_hip_roll"/>
-    <position name="right_hip_pitch" joint="right_hip_pitch"/>
-    <position name="right_knee" joint="right_knee"/>
-    <position name="right_ankle_pitch" joint="right_ankle_pitch"/>
-    <position name="right_ankle_roll" joint="right_ankle_roll"/>
-  </actuator>
+<actuator>
+    <position name="head_yaw" joint="head_yaw"
+              ctrlrange="-2.0944 2.0944"/>
+    <position name="head_pitch" joint="head_pitch"
+              ctrlrange="-0.785398 1.5708"/>
+
+    <position name="left_shoulder_pitch" joint="left_shoulder_pitch"
+              ctrlrange="-2.18166 2.18166"/>
+    <position name="left_shoulder_roll" joint="left_shoulder_roll"
+              ctrlrange="-0.261799 1.309"/>
+    <position name="left_elbow" joint="left_elbow"
+              ctrlrange="-2.79253 0.261799"/>
+
+    <position name="right_shoulder_pitch" joint="right_shoulder_pitch"
+              ctrlrange="-2.18166 2.18166"/>
+    <position name="right_shoulder_roll" joint="right_shoulder_roll"
+              ctrlrange="-1.309 0.261799"/>
+    <position name="right_elbow" joint="right_elbow"
+              ctrlrange="-2.79253 0.261799"/>
+
+    <position name="left_hip_yaw" joint="left_hip_yaw"
+              ctrlrange="-1.0472 1.0472"/>
+    <position name="left_hip_roll" joint="left_hip_roll"
+              ctrlrange="-0.523599 0.610865"/>
+    <position name="left_hip_pitch" joint="left_hip_pitch"
+              ctrlrange="-1.5708 0.67"/>
+    <position name="left_knee" joint="left_knee"
+              ctrlrange="0 2.2689280"/>
+    <position name="left_ankle_pitch" joint="left_ankle_pitch"
+              ctrlrange="-1.308996 1.308996"/>
+    <position name="left_ankle_roll" joint="left_ankle_roll"
+              ctrlrange="-0.785398 0.785398"/>
+
+    <position name="right_hip_yaw" joint="right_hip_yaw"
+              ctrlrange="-1.0472 1.0472"/>
+    <position name="right_hip_roll" joint="right_hip_roll"
+              ctrlrange="-0.610865 0.523599"/>
+    <position name="right_hip_pitch" joint="right_hip_pitch"
+              ctrlrange="-1.5708 0.67"/>
+    <position name="right_knee" joint="right_knee"
+              ctrlrange="0 2.2689280"/>
+    <position name="right_ankle_pitch" joint="right_ankle_pitch"
+              ctrlrange="-1.308996 1.308996"/>
+    <position name="right_ankle_roll" joint="right_ankle_roll"
+              ctrlrange="-0.785398 0.785398"/>
+</actuator>
 </mujoco>
