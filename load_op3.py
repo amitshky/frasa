@@ -12,7 +12,7 @@ def main():
     # Desired state in degrees
     desired_state = {
         "elbow": -49.5,
-        "shoulder_pitch": -19.5,
+        "shoulder_pitch": 19.5,
         "hip_pitch": -52.0,
         "knee": 79.0,
         "ankle_pitch": -36.5,
