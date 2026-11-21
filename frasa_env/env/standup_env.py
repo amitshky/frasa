@@ -28,7 +28,20 @@ class StandupEnv(gymnasium.Env):
             "render_realtime": True,
             # Target robot state (q_motors, tilt) [rad^6]
             # [elbow, shoulder_pitch, hip_pitch, knee, ankle_pitch, IMU_pitch]
-            "desired_state": np.deg2rad([-49.5, 19.5, -52, 79, -36.5, 8.5]),
+            # "desired_state": np.deg2rad([-49.5, 19.5, -52, 79, -36.5, 8.5]),
+            #
+            # r_sho_pitch, l_sho_pitch, r_sho_roll, l_sho_roll, r_el, l_el
+            # r_hip_yaw, l_hip_yaw, r_hip_roll, l_hip_roll, r_hip_pitch, l_hip_pitch,
+            # r_knee, l_knee, r_ank_pitch, l_ank_pitch, r_ank_roll, l_ank_roll,
+            # head_pan, head_tilt,
+            # IMU pitch
+            "desired_state": [  # op3 "walkready" pose
+                0.08552, -0.08727, -0.79587, 0.79258, 0.78889, -0.79258,
+                0.0, 0.0, 0.04363, -0.03840, 0.55502, -0.55502,
+                -1.05765, 1.06465, -0.64027, 0.63852, 0.04014, -0.04189,
+                0.04363, 0.0,
+                0.14 # trunk pitch # TODO: add yaw and roll
+            ],
             # Probability of seeding the robot in finale position
             "reset_final_p": 0.1,
             # Termination conditions
@@ -61,15 +74,51 @@ class StandupEnv(gymnasium.Env):
         self.sim = Simulator()
 
         # Degrees of freedom involved
-        self.dofs = ["elbow", "shoulder_pitch", "hip_pitch", "knee", "ankle_pitch"]
-        self.ranges = [self.sim.model.actuator(f"left_{dof}").ctrlrange for dof in self.dofs]
+        # self.dofs = ["elbow", "shoulder_pitch", "hip_pitch", "knee", "ankle_pitch"]
+        self.dofs = [
+            "r_sho_pitch",
+            "l_sho_pitch",
+            "r_sho_roll",
+            "l_sho_roll",
+            "r_el",
+            "l_el",
+            "r_hip_yaw",
+            "l_hip_yaw",
+            "r_hip_roll",
+            "l_hip_roll",
+            "r_hip_pitch",
+            "l_hip_pitch",
+            "r_knee",
+            "l_knee",
+            "r_ank_pitch",
+            "l_ank_pitch",
+            "r_ank_roll",
+            "l_ank_roll",
+            "head_pan",
+            "head_tilt",
+        ]
+        # check if joint and actuators exist
+        # WARNING: the names of the joints and actutors should be the same
+        for dof in self.dofs:
+            actuator_id = self.sim.get_actuator_index(dof)
+            if actuator_id < 0:
+                raise ValueError(f"Missing OP3 actuator: {dof}")
+            joint_id = self.sim.get_joint_index(dof)
+            if joint_id < 0:
+                raise ValueError(f"Missing OP3 joint: {dof}")
 
         # Pre-fetching indexes and sites for faster evaluation
-        self.trunk_site = self.sim.data.site("trunk")
-        self.left_actuators_indexes = [self.sim.get_actuator_index(f"left_{dof}") for dof in self.dofs]
-        self.right_actuators_indexes = [self.sim.get_actuator_index(f"right_{dof}") for dof in self.dofs]
-        self.range_low = np.array([r[0] for r in self.ranges])
-        self.range_high = np.array([r[1] for r in self.ranges])
+        self.trunk_site = self.sim.data.site("torso")
+        self.ranges = []
+        self.actuators_indexes = []
+        for dof in self.dofs:
+            self.ranges.append(self.sim.model.actuator(f"{dof}").ctrlrange)
+            self.actuators_indexes.append(self.sim.get_actuator_index(f"{dof}"))
+        self.range_low = np.array([], dtype=np.float32)
+        self.range_high = np.array([], dtype=np.float32)
+        for r in self.ranges:
+            self.range_low = np.append(self.range_low, r[0])
+            self.range_high = np.append(self.range_high, r[1])
 
         # Action space is q
         max_variation = self.options["dt"] * self.options["vmax"]
@@ -101,15 +150,15 @@ class StandupEnv(gymnasium.Env):
             np.array(
                 [
                     # q (0-4)
-                    *(-np.pi * np.ones(len(self.dofs))),
+                    *(-np.pi * np.ones(len(self.dofs))), # q
                     # dq (5-9)
-                    *(-10 * np.ones(len(self.dofs))),
+                    *(-10 * np.ones(len(self.dofs))), # q dot
                     # ctrl (10-14)
-                    *self.range_low,
+                    *self.range_low, # ctrl
                     # tilt (15)
-                    -np.pi,
+                    -np.pi, # trunk pitch (theta)
                     # dtilt (16)
-                    -10,
+                    -10, # theta dot
                     # Previous action
                     *(list(self.action_space.low) * self.options["previous_actions"]),
                 ],
@@ -147,7 +196,7 @@ class StandupEnv(gymnasium.Env):
         self.dtilt_history_size = max(1, round(self.options["dtilt_delay"] / self.sim.dt))
 
         # Values for randomization
-        self.trunk_body = "torso_2023"
+        self.trunk_body = "body_link"
         self.trunk_mass = self.sim.model.body(self.trunk_body).mass.copy()
         self.trunk_ipos = self.sim.model.body(self.trunk_body).ipos.copy()
         self.gainprm_original = self.sim.model.actuator_gainprm.copy()
@@ -166,28 +215,28 @@ class StandupEnv(gymnasium.Env):
                 self.initial_config = pickle.load(f)
 
     def get_initial_config_filename(self) -> str:
-        return os.path.join(os.path.dirname(os.path.realpath(__file__)), "standup_initial_configurations.pkl")
+        return os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                            "standup_initial_configurations.pkl")
 
     def apply_control(self, q: np.ndarray, reset: bool = False) -> None:
-        self.sim.data.ctrl[self.left_actuators_indexes] = q
-        self.sim.data.ctrl[self.right_actuators_indexes] = q
-
+        self.sim.data.ctrl[self.actuators_indexes] = q
         if reset:
             for k, dof in enumerate(self.dofs):
-                self.sim.set_control(f"left_{dof}", q[k], True)
-                self.sim.set_control(f"right_{dof}", q[k], True)
+                self.sim.set_control(f"{dof}", q[k], True)
 
     def get_tilt(self) -> float:
         R = self.trunk_site.xmat
-        return -np.arctan2(R[6], R[8])
+        return -np.arctan2(R[6], R[8])  # TODO: add yaw and roll
 
     def get_observation(self) -> np.ndarray:
         # Retrieving joints
         q = self.q_history[-1]
-        q_dot = (np.array(self.q_history[-1]) - np.array(self.q_history[0])) / (self.q_history_size * self.sim.dt)
+        q_dot = (
+            np.array(self.q_history[-1]) - np.array(self.q_history[0])
+        ) / (max(1, self.q_history_size - 1) * self.sim.dt)
 
         # Current control
-        ctrl = [self.sim.get_control(f"left_{dof}") for dof in self.dofs]
+        ctrl = [self.sim.get_control(f"{dof}") for dof in self.dofs]
         ctrl = np.array(ctrl)
 
         # Tilt, dtilt
@@ -212,7 +261,7 @@ class StandupEnv(gymnasium.Env):
         action = np.array(action)
 
         # Current control
-        start_ctrl = [self.sim.get_control(f"left_{dof}") for dof in self.dofs]
+        start_ctrl = [self.sim.get_control(f"{dof}") for dof in self.dofs]
 
         # Applying the action
         if self.options["control"] == "position":
@@ -223,7 +272,7 @@ class StandupEnv(gymnasium.Env):
             target_ctrl_unclipped = start_ctrl + action * self.options["dt"]
         elif self.options["control"] == "error":
             # Action is an error w.r.t the read configuration
-            start_q = [self.sim.get_q(f"left_{dof}") for dof in self.dofs]
+            start_q = [self.sim.get_q(f"{dof}") for dof in self.dofs]
             target_ctrl_unclipped = np.array(start_q) + action
 
         # Limiting the control
@@ -256,7 +305,7 @@ class StandupEnv(gymnasium.Env):
                     shock = True
                 self.centroidal_force = centroidal_force
 
-            q = [self.sim.get_q(f"left_{dof}") for dof in self.dofs]
+            q = [self.sim.get_q(f"{dof}") for dof in self.dofs]
             self.q_history.append(q)
 
             self.tilt_history.append(self.get_tilt())
@@ -289,7 +338,13 @@ class StandupEnv(gymnasium.Env):
         obs = self.get_observation()
 
         state_current = [*self.q_history[-1], self.tilt_history[-1]]
-        reward = np.exp(-20 * (np.linalg.norm(np.array(state_current) - np.array(self.options["desired_state"])) ** 2))
+        reward = np.exp(
+            -20 * (
+                np.linalg.norm(
+                    np.array(state_current) - np.array(self.options["desired_state"])
+                ) ** 2
+            )
+        )
 
         action_variation = np.abs(action - self.previous_actions[-1])
         self.previous_actions.append(action)
@@ -320,15 +375,17 @@ class StandupEnv(gymnasium.Env):
         reward += np.exp(-self.sim.self_collisions()) * 1e-1
 
         # Terminating the episode after the trucate_duration
-        terminated = self.sim.t > self.options["truncate_duration"]
+        terminated = done
+        truncated = self.sim.t > self.options["truncate_duration"]
 
-        return obs, reward, done, terminated, {}
+        return obs, reward, terminated, truncated, {}
 
     def apply_angular_offset(self, joint: str, offset: float):
-        body_id = self.sim.model.joint(joint).bodyid
-        quat = self.sim.model.body_quat[body_id][0]
-        quat = tf.quaternion_multiply(quat, tf.quaternion_about_axis(offset, [0, 0, 1]))
-        self.sim.model.body_quat[body_id] = quat
+        # body_id = self.sim.model.joint(joint).bodyid
+        # quat = self.sim.model.body_quat[body_id][0]
+        # quat = tf.quaternion_multiply(quat, tf.quaternion_about_axis(offset, [0, 0, 1]))
+        # self.sim.model.body_quat[body_id] = quat
+        self.sim.randomize_joint(joint, offset)
 
     def apply_randomization(self):
         # Randomizing the time ratio
@@ -366,8 +423,11 @@ class StandupEnv(gymnasium.Env):
 
         # Adding error angles
         err_rad = np.deg2rad(self.options["random_angles"])
-        for dof in self.sim.dof_names():
-            self.apply_angular_offset(dof, self.np_random.uniform(-err_rad, err_rad))
+        for dof in self.sim.actuator_names():
+            self.apply_angular_offset(
+                dof, self.np_random.uniform(-err_rad, err_rad))
+
+        self.sim.forward()
 
     def randomize_fall(self, target: bool = False):
         # Decide if we will use the target
@@ -379,12 +439,21 @@ class StandupEnv(gymnasium.Env):
         initial_q = self.np_random.uniform(low=-np.pi, high=np.pi, size=(len(self.dofs),))
 
         # If target, we will use the q_target
+        # if target:
+        #     initial_q = my_target[: len(self.dofs)]
+        #     offset = self.np_random.uniform(-0.1, 0.1)
+        #     initial_q[2] -= offset
+        #     initial_q[3] += offset * 2
+        #     initial_q[4] -= offset
         if target:
-            initial_q = my_target[: len(self.dofs)]
+            initial_q = my_target[:len(self.dofs)].copy()
             offset = self.np_random.uniform(-0.1, 0.1)
-            initial_q[2] -= offset
-            initial_q[3] += offset * 2
-            initial_q[4] -= offset
+            initial_q[10] -= offset
+            initial_q[11] += offset
+            initial_q[12] += 2 * offset
+            initial_q[13] -= 2 * offset
+            initial_q[14] -= offset
+            initial_q[15] += offset
 
         initial_q = np.clip(initial_q, self.range_low, self.range_high)
 
@@ -397,7 +466,7 @@ class StandupEnv(gymnasium.Env):
             initial_tilt = my_target[-1]
         T_world_trunk = tf.rotation_matrix(initial_tilt, [0, 1, 0])
         T_world_trunk[:3, 3] = [0, 0, 0.4]
-        self.sim.set_T_world_site("trunk", T_world_trunk)
+        self.sim.set_T_world_site("torso", T_world_trunk)
 
         # Wait for the robot to stabilize
         for _ in range(round(self.options["stabilization_time"] / self.sim.dt)):
@@ -405,7 +474,7 @@ class StandupEnv(gymnasium.Env):
 
     def reset(
         self,
-        seed: int = None,
+        seed: int | None = None,
         options: Optional[dict] = None,
     ):
         super().reset(seed=seed)
@@ -435,11 +504,11 @@ class StandupEnv(gymnasium.Env):
         self.sim.reset_render()
 
         # Taking arms a little bit inside
-        self.sim.set_control("left_shoulder_roll", -np.deg2rad(5))
-        self.sim.set_control("right_shoulder_roll", np.deg2rad(5))
+        self.sim.set_control("l_sho_roll", -np.deg2rad(5))
+        self.sim.set_control("r_sho_roll", np.deg2rad(5))
 
         # Initializing the history
-        q = [self.sim.get_q(f"left_{dof}") for dof in self.dofs]
+        q = [self.sim.get_q(f"{dof}") for dof in self.dofs]
         self.q_history = [q] * self.q_history_size
 
         # Initializing the tilt history

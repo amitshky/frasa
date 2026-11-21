@@ -20,9 +20,11 @@ class Simulator:
         self.data: mujoco.MjData = mujoco.MjData(self.model)
 
         # Retrieve the degrees of freedom id/name pairs
-        joints = len(self.model.jnt_pos)
-        self.dofs = [[k, self.model.jnt(k).name] for k in range(1, joints)]
-        self.dofs_to_index = {dof: k for k, dof in self.dofs}
+        self.dofs_to_index = {
+            self.model.joint(i).name: i
+            for i in range(self.model.njnt)
+            if self.model.jnt_type[i] == mujoco.mjtJoint.mjJNT_HINGE
+        }
 
         self.viewer = None
         self.t: float = 0.0
@@ -48,8 +50,11 @@ class Simulator:
     def centroidal_force(self) -> float:
         return np.linalg.norm(self.data.qfrc_constraint[3:])
 
-    def dof_names(self) -> list:
-        return [mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, i) for i in range(self.model.nu)]
+    def actuator_names(self) -> list:
+        return [
+            mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, i)
+            for i in range(self.model.nu)
+        ]
 
     def reset(self) -> None:
         mujoco.mj_resetData(self.model, self.data)
@@ -99,6 +104,50 @@ class Simulator:
         addr = self.model.jnt_qposadr[self.dofs_to_index[name]]
         self.data.qpos[addr] = value
 
+    def randomize_joint(self, name: str, offset: float) -> None:
+        """
+        Randomizes a robot joint's position by applying a specified angular offset.
+
+        Updates both the joint position (qpos) and its corresponding actuator
+        target (ctrl). Updating both ensures that the position actuator does not
+        immediately drive the joint back to its previous target.
+
+        Args:
+            name (str): Name of the joint and its corresponding actuator.
+                        The joint must be a hinge joint.
+                        This assumes that the joint and the actuator
+                        names are same
+            offset (float): Angular offset to apply to the current joint position,
+                            in radians.
+
+        Raises:
+            ValueError: If the specified joint or actuator does not exist,
+                        or if the joint is not a hinge joint.
+
+        Note:
+            The resulting joint position is clipped to the actuator's control
+            range to ensure the target remains within its permitted limits.
+        """
+        joint_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_JOINT, name
+        )
+        actuator_id = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name
+        )
+        if joint_id < 0 or actuator_id < 0:
+            raise ValueError(f"Missing joint or actuator: {name}")
+        if self.model.jnt_type[joint_id] != mujoco.mjtJoint.mjJNT_HINGE:
+            raise ValueError(f"{name} is not a hinge joint")
+        qpos_addr = self.model.jnt_qposadr[joint_id]
+        ctrl_range = self.model.actuator_ctrlrange[actuator_id]
+        new_q = np.clip(
+            self.data.qpos[qpos_addr] + offset,
+            ctrl_range[0],
+            ctrl_range[1],
+        )
+        self.data.qpos[qpos_addr] = new_q
+        self.data.ctrl[actuator_id] = new_q
+
     def get_control(self, name: str) -> None:
         """
         Gets the control for a given actuator
@@ -111,6 +160,9 @@ class Simulator:
 
     def get_actuator_index(self, name: str) -> int:
         return mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_ACTUATOR, name)
+
+    def get_joint_index(self, name: str) -> int:
+        return mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, name)
 
     def set_control(self, name: str, value: float, reset: bool = False) -> None:
         """
@@ -237,6 +289,9 @@ class Simulator:
         ]
 
         return {"left": left_pressures, "right": right_pressures}
+
+    def forward(self):
+        mujoco.mj_forward(self.model, self.data)
 
     def step(self) -> None:
         self.t = self.frame * self.dt

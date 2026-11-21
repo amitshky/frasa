@@ -25,6 +25,9 @@ check-codestyle:
 
 commit-checks: format mypy lint
 
+init_poses:
+	python standup_generate_initial.py
+
 run:
 	python enjoy_sbx.py \
 		--algo crossq \
