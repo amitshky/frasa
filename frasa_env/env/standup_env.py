@@ -30,17 +30,19 @@ class StandupEnv(gymnasium.Env):
             # [elbow, shoulder_pitch, hip_pitch, knee, ankle_pitch, IMU_pitch]
             # "desired_state": np.deg2rad([-49.5, 19.5, -52, 79, -36.5, 8.5]),
             #
-            # r_sho_pitch, l_sho_pitch, r_sho_roll, l_sho_roll, r_el, l_el
-            # r_hip_yaw, l_hip_yaw, r_hip_roll, l_hip_roll, r_hip_pitch, l_hip_pitch,
-            # r_knee, l_knee, r_ank_pitch, l_ank_pitch, r_ank_roll, l_ank_roll,
-            # head_pan, head_tilt,
-            # IMU pitch
-            "desired_state": [  # op3 "walkready" pose
+            "desired_state": [
+                # r_sho_pitch, l_sho_pitch, r_sho_roll, l_sho_roll, r_el, l_el
+                # r_hip_yaw, l_hip_yaw, r_hip_roll, l_hip_roll, r_hip_pitch, l_hip_pitch
+                # r_knee, l_knee, r_ank_pitch, l_ank_pitch, r_ank_roll, l_ank_roll
+                # head_pan, head_tilt
+                # IMU roll, IMU pitch, IMU yaw
+
                 0.08552, -0.08727, -0.79587, 0.79258, 0.78889, -0.79258,
                 0.0, 0.0, 0.04363, -0.03840, 0.55502, -0.55502,
                 -1.05765, 1.06465, -0.64027, 0.63852, 0.04014, -0.04189,
                 0.04363, 0.0,
-                0.14 # trunk pitch # TODO: add yaw and roll
+
+                0.0, 0.14, 0.0
             ],
             # Probability of seeding the robot in finale position
             "reset_final_p": 0.1,
@@ -145,38 +147,39 @@ class StandupEnv(gymnasium.Env):
         else:
             raise ValueError(f"Unknown control type: {self.options['control']}")
 
-        # Observation is q_pitch, dqpitch, tilt, dtilt
+        # Observation: joint positions, joint velocities, controls,
+        # IMU roll/pitch/yaw, angular velocity x/y/z, previous actions
         self.observation_space = spaces.Box(
             np.array(
                 [
-                    # q (0-4)
-                    *(-np.pi * np.ones(len(self.dofs))), # q
-                    # dq (5-9)
-                    *(-10 * np.ones(len(self.dofs))), # q dot
-                    # ctrl (10-14)
-                    *self.range_low, # ctrl
-                    # tilt (15)
-                    -np.pi, # trunk pitch (theta)
-                    # dtilt (16)
-                    -10, # theta dot
-                    # Previous action
+                    # Joint positions (20)
+                    *(-np.pi * np.ones(len(self.dofs))),
+                    # Joint velocities (20)
+                    *(-10 * np.ones(len(self.dofs))),
+                    # Controls (20)
+                    *self.range_low,
+                    # IMU roll, pitch, yaw (3)
+                    -np.pi, -np.pi, -np.pi,
+                    # Angular velocity x, y, z (3)
+                    -10, -10, -10,
+                    # Previous actions
                     *(list(self.action_space.low) * self.options["previous_actions"]),
                 ],
                 dtype=np.float32,
             ),
             np.array(
                 [
-                    # q (0-4)
+                    # Joint positions (20)
                     *(np.pi * np.ones(len(self.dofs))),
-                    # dq (5-9)
+                    # Joint velocities (20)
                     *(10 * np.ones(len(self.dofs))),
-                    # ctrl (10-14)
+                    # Controls (20)
                     *self.range_high,
-                    # tilt (15)
-                    np.pi,
-                    # dtilt (16)
-                    10,
-                    # Previous action
+                    # IMU roll, pitch, yaw (3)
+                    np.pi, np.pi, np.pi,
+                    # Angular velocity x, y, z (3)
+                    10, 10, 10,
+                    # Previous actions
                     *(list(self.action_space.high) * self.options["previous_actions"]),
                 ],
                 dtype=np.float32,
@@ -189,11 +192,11 @@ class StandupEnv(gymnasium.Env):
         self.q_history_size = max(1, round(self.options["qdot_delay"] / self.sim.dt))
 
         # Window for tilt delay simulation
-        self.tilt_history = []
-        self.tilt_history_size = max(1, round(self.options["tilt_delay"] / self.sim.dt))
+        self.orientation_history = []
+        self.orientation_history_size = max(1, round(self.options["tilt_delay"] / self.sim.dt))
 
-        self.dtilt_history = []
-        self.dtilt_history_size = max(1, round(self.options["dtilt_delay"] / self.sim.dt))
+        self.d_orientation_history = []
+        self.d_orientation_history_size = max(1, round(self.options["dtilt_delay"] / self.sim.dt))
 
         # Values for randomization
         self.trunk_body = "body_link"
@@ -224,9 +227,19 @@ class StandupEnv(gymnasium.Env):
             for k, dof in enumerate(self.dofs):
                 self.sim.set_control(f"{dof}", q[k], True)
 
-    def get_tilt(self) -> float:
-        R = self.trunk_site.xmat
-        return -np.arctan2(R[6], R[8])  # TODO: add yaw and roll
+    def get_orientation(self):
+        """
+        Returns the torso orientation in the world frame.
+
+        Returns:
+            np.ndarray: [roll, pitch, yaw] in radians.
+        """
+        T_world_torso = self.sim.get_T_world_site("torso")
+        roll, pitch, yaw = tf.euler_from_matrix(
+            T_world_torso, axes="sxyz"
+        )
+
+        return np.array([roll, pitch, yaw])
 
     def get_observation(self) -> np.ndarray:
         # Retrieving joints
@@ -239,9 +252,10 @@ class StandupEnv(gymnasium.Env):
         ctrl = [self.sim.get_control(f"{dof}") for dof in self.dofs]
         ctrl = np.array(ctrl)
 
-        # Tilt, dtilt
-        tilt = self.tilt_history[0]
-        dtilt = self.dtilt_history[0]
+        # IMU orientation: roll, pitch, yaw
+        orientation = np.array(self.orientation_history[0])
+        # Angular velocity: x, y, z
+        d_orientation = np.array(self.d_orientation_history[0])
         # gyro = self.sim.get_gyro()
         # dtilt = gyro[1]
 
@@ -250,8 +264,8 @@ class StandupEnv(gymnasium.Env):
                 *q,
                 *q_dot,
                 *ctrl,
-                tilt,
-                dtilt,
+                *orientation,
+                *d_orientation,
                 *(np.array(self.previous_actions).flatten()),
             ],
             dtype=np.float32,
@@ -308,36 +322,41 @@ class StandupEnv(gymnasium.Env):
             q = [self.sim.get_q(f"{dof}") for dof in self.dofs]
             self.q_history.append(q)
 
-            self.tilt_history.append(self.get_tilt())
-            self.dtilt_history.append(self.sim.get_gyro()[1])
+            self.orientation_history.append(self.get_orientation())
+            self.d_orientation_history.append(self.sim.get_gyro().copy())
 
             if self.render_mode == "human":
                 self.sim.render(self.options["render_realtime"])
 
         # Terminating in case of upside down robot
         if self.options["terminate_upside_down"]:
-            tilt = self.get_tilt()
-            if np.rad2deg(np.abs(tilt)) > 135:
+            roll, pitch, yaw = self.get_orientation()
+            if np.rad2deg(max(abs(roll), abs(pitch))) > 135:
                 done = True
 
         # Penalizing high gyro
         if self.options["terminate_gyro"]:
             gyro = self.sim.get_gyro()
-            if abs(gyro[1]) > 5:
+            if np.max(np.abs(gyro)) > 5:
                 done = True
 
         # Shock termination
         if self.options["terminate_shock"] and shock:
             done = True
 
-        self.q_history = self.q_history[-self.q_history_size :]
-        self.tilt_history = self.tilt_history[-self.tilt_history_size :]
-        self.dtilt_history = self.dtilt_history[-self.dtilt_history_size :]
+        self.q_history = self.q_history[-self.q_history_size:]
+        self.orientation_history = self.orientation_history[-self.orientation_history_size:]
+        self.d_orientation_history = self.d_orientation_history[-self.d_orientation_history_size:]
 
         # Extracting observation
         obs = self.get_observation()
 
-        state_current = [*self.q_history[-1], self.tilt_history[-1]]
+        state_current = np.concatenate(
+            [
+                np.array(self.q_history[-1]),
+                np.array(self.orientation_history[-1]),
+            ]
+        )
         reward = np.exp(
             -20 * (
                 np.linalg.norm(
@@ -461,10 +480,21 @@ class StandupEnv(gymnasium.Env):
         self.apply_control(initial_q, True)
         self.sim.step()
 
-        initial_tilt = self.np_random.uniform(-np.pi / 2, np.pi / 2)
+        # Initial torso orientation
         if target:
-            initial_tilt = my_target[-1]
-        T_world_trunk = tf.rotation_matrix(initial_tilt, [0, 1, 0])
+            initial_roll = my_target[-3]
+            initial_pitch = my_target[-2]
+            initial_yaw = my_target[-1]
+        else:
+            initial_roll = 0.0
+            initial_pitch = self.np_random.uniform(-np.pi / 2, np.pi / 2)
+            initial_yaw = 0.0
+        T_world_trunk = tf.euler_matrix(
+            initial_roll,
+            initial_pitch,
+            initial_yaw,
+            axes="sxyz",
+        )
         T_world_trunk[:3, 3] = [0, 0, 0.4]
         self.sim.set_T_world_site("torso", T_world_trunk)
 
@@ -511,9 +541,18 @@ class StandupEnv(gymnasium.Env):
         q = [self.sim.get_q(f"{dof}") for dof in self.dofs]
         self.q_history = [q] * self.q_history_size
 
-        # Initializing the tilt history
-        self.tilt_history = [self.get_tilt()] * self.tilt_history_size
-        self.dtilt_history = [0] * self.dtilt_history_size
+        # Initializing the orientation history: roll, pitch, yaw
+        initial_orientation = self.get_orientation()
+        self.orientation_history = [
+            initial_orientation.copy()
+            for _ in range(self.orientation_history_size)
+        ]
+        # Initializing angular velocity history: x, y, z
+        initial_gyro = self.sim.get_gyro().copy()
+        self.d_orientation_history = [
+            initial_gyro.copy()
+            for _ in range(self.d_orientation_history_size)
+        ]
 
         # Initializing the previous action
         self.previous_actions = [np.zeros(len(self.dofs))] * self.options["previous_actions"]

@@ -92,7 +92,7 @@ def main():
             viewer.sync()
 
             print(
-                f"Showing config {index + 1}/{num_configs}"
+                f"Showing config id (starts with 0): {index}/{num_configs - 1}"
                 + (" [PAUSED]" if is_paused else "")
             )
 

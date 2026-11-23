@@ -330,14 +330,17 @@ class Simulator:
 if __name__ == "__main__":
     sim = Simulator()
     sim.step()
-    sim.set_T_world_site("left_foot", np.eye(4))
+    T = np.eye(4)
+    T[2, 3] = 0.5
+
+    sim.set_T_world_site("torso", T)
 
     sim.step()
     start = time.time()
     while True:
         sim.render(True)
-        sim.set_control("head_yaw", np.sin(sim.t))
-        sim.set_control("head_pitch", np.sin(sim.t))
+        sim.set_control("head_pan", np.sin(sim.t))
+        sim.set_control("head_tilt", np.sin(sim.t))
         sim.step()
 
         elapsed = time.time() - start
